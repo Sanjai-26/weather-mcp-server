@@ -4,16 +4,19 @@ import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { z } from 'zod';
 
 const app = express();
-app.use(express.json());
 
+// ⚠️ IMPORTANT: Apply JSON middleware only to non-MCP routes
+// Do NOT put express.json() globally — it breaks SSE stream
+
+// ─────────────────────────────────────────
+// MCP Server Setup
+// ─────────────────────────────────────────
 const mcpServer = new McpServer({
   name: "weather-mcp",
   version: "1.0.0"
 });
 
-// ─────────────────────────────────────────
-// TOOL 1: Get Current Weather by City Name
-// ─────────────────────────────────────────
+// TOOL 1: Get Current Weather
 mcpServer.tool(
   "get_current_weather",
   "Get current weather for any city using Open-Meteo (free, no API key)",
@@ -21,8 +24,6 @@ mcpServer.tool(
     city: z.string().describe("City name, e.g. London, Tokyo, New York")
   },
   async ({ city }) => {
-
-    // Step A: Convert city name → lat/lon (free geocoding API)
     const geoRes = await fetch(
       `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1`
     );
@@ -34,7 +35,6 @@ mcpServer.tool(
 
     const { latitude, longitude, name, country } = geoData.results[0];
 
-    // Step B: Fetch weather using lat/lon
     const weatherRes = await fetch(
       `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}` +
       `&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code` +
@@ -55,9 +55,7 @@ mcpServer.tool(
   }
 );
 
-// ─────────────────────────────────────────
-// TOOL 2: Get 3-Day Weather Forecast
-// ─────────────────────────────────────────
+// TOOL 2: Get 3-Day Forecast
 mcpServer.tool(
   "get_weather_forecast",
   "Get a 3-day weather forecast for any city",
@@ -65,8 +63,6 @@ mcpServer.tool(
     city: z.string().describe("City name, e.g. Paris, Dubai, Sydney")
   },
   async ({ city }) => {
-
-    // Geocode
     const geoRes = await fetch(
       `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1`
     );
@@ -78,7 +74,6 @@ mcpServer.tool(
 
     const { latitude, longitude, name, country } = geoData.results[0];
 
-    // Fetch 3-day forecast
     const forecastRes = await fetch(
       `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}` +
       `&daily=temperature_2m_max,temperature_2m_min,weather_code,precipitation_sum` +
@@ -100,7 +95,7 @@ mcpServer.tool(
 );
 
 // ─────────────────────────────────────────
-// Helper: WMO Weather Code → Description
+// Helper: Weather Code → Description
 // ─────────────────────────────────────────
 function getWeatherDescription(code) {
   const codes = {
@@ -115,16 +110,28 @@ function getWeatherDescription(code) {
 }
 
 // ─────────────────────────────────────────
-// SSE Transport (required for MCP clients)
+// SSE Transport
 // ─────────────────────────────────────────
 const transports = {};
 
 app.get('/sse', async (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+
   const transport = new SSEServerTransport('/messages', res);
   transports[transport.sessionId] = transport;
+
+  req.on('close', () => {
+    delete transports[transport.sessionId];
+  });
+
   await mcpServer.connect(transport);
 });
 
+// ⚠️ KEY FIX: Do NOT use express.json() on /messages route
+// MCP SDK reads raw stream directly
 app.post('/messages', async (req, res) => {
   const sessionId = req.query.sessionId;
   const transport = transports[sessionId];
@@ -133,6 +140,16 @@ app.post('/messages', async (req, res) => {
   } else {
     res.status(400).json({ error: 'Session not found' });
   }
+});
+
+// Health & Root routes — these CAN use JSON
+app.use(express.json());
+
+app.get('/', (req, res) => {
+  res.json({
+    message: '🌤️ Weather MCP Server is running!',
+    endpoints: ['/health', '/sse', '/messages']
+  });
 });
 
 app.get('/health', (req, res) => {
