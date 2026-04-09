@@ -13,7 +13,7 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
 }));
 
-// ✅ FIX 2: Handle preflight OPTIONS requests
+// ✅ FIX 2: Handle preflight OPTIONS requests ....
 app.options('*', cors());
 
 // ─────────────────────────────────────────
