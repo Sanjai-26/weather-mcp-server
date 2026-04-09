@@ -6,15 +6,12 @@ import { z } from 'zod';
 
 const app = express();
 
-// ✅ FIX 1: Enable CORS for all routes — allows MCP Inspector to connect
+// ✅ CORS Middleware
 app.use(cors({
   origin: '*',
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
 }));
-
-// ✅ FIX 2: Handle preflight OPTIONS requests ....
-app.options('*', cors());
 
 // ─────────────────────────────────────────
 // MCP Server Setup
@@ -24,7 +21,9 @@ const mcpServer = new McpServer({
   version: "1.0.0"
 });
 
+// ─────────────────────────────────────────
 // TOOL 1: Get Current Weather
+// ─────────────────────────────────────────
 mcpServer.tool(
   "get_current_weather",
   "Get current weather for any city using Open-Meteo (free, no API key)",
@@ -63,7 +62,9 @@ mcpServer.tool(
   }
 );
 
+// ─────────────────────────────────────────
 // TOOL 2: Get 3-Day Forecast
+// ─────────────────────────────────────────
 mcpServer.tool(
   "get_weather_forecast",
   "Get a 3-day weather forecast for any city",
@@ -123,12 +124,11 @@ function getWeatherDescription(code) {
 const transports = {};
 
 app.get('/sse', async (req, res) => {
-  // ✅ FIX 3: Correct SSE headers
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.flushHeaders(); // ✅ FIX 4: Flush headers immediately
+  res.flushHeaders();
 
   const transport = new SSEServerTransport('/messages', res);
   transports[transport.sessionId] = transport;
@@ -141,7 +141,9 @@ app.get('/sse', async (req, res) => {
   await mcpServer.connect(transport);
 });
 
-// ✅ FIX 5: Raw body for /messages — do NOT parse with express.json()
+// ─────────────────────────────────────────
+// Messages Route — No express.json() here!
+// ─────────────────────────────────────────
 app.post('/messages', async (req, res) => {
   const sessionId = req.query.sessionId;
   console.log(`Message received for session: ${sessionId}`);
@@ -155,9 +157,9 @@ app.post('/messages', async (req, res) => {
 });
 
 // ─────────────────────────────────────────
-// Health & Root routes
+// Health & Root Routes
 // ─────────────────────────────────────────
-app.use(express.json()); // Only applied after /messages route
+app.use(express.json());
 
 app.get('/', (req, res) => {
   res.json({
@@ -170,4 +172,7 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', server: 'Weather MCP (Open-Meteo)', tools: 2 });
 });
 
+// ─────────────────────────────────────────
+// Start Server
+// ─────────────────────────────────────────
 app.listen(3000, () => console.log('🌤️ Weather MCP Server running on port 3000!'));
