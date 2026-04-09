@@ -8,6 +8,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "latest",
     "express": "latest",
-    "zod": "latest"
+    "zod": "latest",
+    "cors": "latest"
   }
 }

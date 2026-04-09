@@ -1,12 +1,20 @@
 import express from 'express';
+import cors from 'cors';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { z } from 'zod';
 
 const app = express();
 
-// ⚠️ IMPORTANT: Apply JSON middleware only to non-MCP routes
-// Do NOT put express.json() globally — it breaks SSE stream
+// ✅ FIX 1: Enable CORS for all routes — allows MCP Inspector to connect
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+}));
+
+// ✅ FIX 2: Handle preflight OPTIONS requests
+app.options('*', cors());
 
 // ─────────────────────────────────────────
 // MCP Server Setup
@@ -115,35 +123,41 @@ function getWeatherDescription(code) {
 const transports = {};
 
 app.get('/sse', async (req, res) => {
+  // ✅ FIX 3: Correct SSE headers
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('Access-Control-Allow-Origin', '*');
+  res.flushHeaders(); // ✅ FIX 4: Flush headers immediately
 
   const transport = new SSEServerTransport('/messages', res);
   transports[transport.sessionId] = transport;
 
   req.on('close', () => {
     delete transports[transport.sessionId];
+    console.log(`Session ${transport.sessionId} disconnected`);
   });
 
   await mcpServer.connect(transport);
 });
 
-// ⚠️ KEY FIX: Do NOT use express.json() on /messages route
-// MCP SDK reads raw stream directly
+// ✅ FIX 5: Raw body for /messages — do NOT parse with express.json()
 app.post('/messages', async (req, res) => {
   const sessionId = req.query.sessionId;
+  console.log(`Message received for session: ${sessionId}`);
   const transport = transports[sessionId];
   if (transport) {
     await transport.handlePostMessage(req, res);
   } else {
+    console.log(`No transport found for sessionId: ${sessionId}`);
     res.status(400).json({ error: 'Session not found' });
   }
 });
 
-// Health & Root routes — these CAN use JSON
-app.use(express.json());
+// ─────────────────────────────────────────
+// Health & Root routes
+// ─────────────────────────────────────────
+app.use(express.json()); // Only applied after /messages route
 
 app.get('/', (req, res) => {
   res.json({
